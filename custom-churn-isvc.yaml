@@ -1,0 +1,38 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: custom-churn-predictor
+  namespace: default
+spec:
+  predictor:
+    # Uncomment the next 2 lines if using Docker Hub private repo
+    # imagePullSecrets:
+    #   - name: dockerhub-secret
+    containers:
+      - name: kserve-container
+        image: hamzalghali/mlopsapp:v1.0
+        ports:
+          - containerPort: 8080
+            protocol: TCP
+        env:
+          - name: MODEL_NAME
+            value: "churn-predictor"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10

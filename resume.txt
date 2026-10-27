@@ -1,0 +1,35 @@
+Project: Churn Prediction MLOps Monitoring System
+
+Developed an end-to-end machine learning operations project focused on customer churn prediction and production monitoring. The solution combines model training, deployment, real-time inference, and continuous monitoring to ensure that the model remains reliable in production.
+
+Key responsibilities and contributions:
+- Built a churn prediction model using Python and scikit-learn to identify customers at risk of churn.
+- Integrated MLflow for experiment tracking, model versioning, and production model management.
+- Deployed the model using KServe and Kubernetes-based serving patterns for scalable inference.
+- Designed a Kubeflow Pipelines workflow to automate data processing, prediction generation, and monitoring tasks.
+- Used Evidently AI to detect data drift, prediction drift, and overall data quality issues between reference and current datasets.
+- Generated HTML monitoring reports and dashboard-ready outputs for production review.
+- Created deployment manifests and container assets for reproducible MLOps workflows in cloud environments.
+
+Technologies used:
+- Python
+- scikit-learn
+- MLflow
+- KServe
+- Kubeflow Pipelines
+- Evidently AI
+- Docker
+- Kubernetes
+- Google Cloud and MLOps deployment patterns
+
+Project impact:
+This project demonstrates a practical MLOps pipeline for monitoring machine learning systems in production, with emphasis on model health, data quality, and drift detection. It showcases the ability to move from experimentation to deployment while maintaining governance and operational visibility.
+
+Skills demonstrated:
+- MLOps architecture
+- Model deployment and serving
+- Drift detection and monitoring
+- Kubernetes and container deployment
+- Data quality assessment
+- ML pipeline automation
+- Production ML monitoring

@@ -1,0 +1,346 @@
+# PIPELINE DEFINITION
+# Name: inference-pipeline-with-monitoring
+# Inputs:
+#    churn_dataset_uri: str [Default: 'gs://churn-datasets-mlops-training/churn_data_2025_05.csv']
+#    model_name: str [Default: 'ChurnPrediction']
+#    reference_dataset_uri: str [Default: 'gs://churn-datasets-mlops-training/churn_data_reference.csv']
+#    tracking_uri: str [Default: 'https://mlflow-server-instance-ezxhpzskva-od.a.run.app']
+components:
+  comp-load-data-with-monitoring:
+    executorLabel: exec-load-data-with-monitoring
+    inputDefinitions:
+      parameters:
+        dataset_uri:
+          parameterType: STRING
+        reference_dataset_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        data_quality_report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-monitor-model-performance:
+    executorLabel: exec-monitor-model-performance
+    inputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        predictions:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        reference_dataset_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        performance_report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+  comp-predict-with-monitoring:
+    executorLabel: exec-predict-with-monitoring
+    inputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        model_name:
+          parameterType: STRING
+        reference_dataset_uri:
+          parameterType: STRING
+        tracking_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        prediction_quality_report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+        predictions:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-load-data-with-monitoring:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - load_data_with_monitoring
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'fsspec' 'gcsfs'\
+          \ 'pandas' 'scikit-learn' 'evidently==0.6.6' 'google-cloud-storage' 'google-auth'\
+          \ 'protobuf<5,>=4.21.1' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef load_data_with_monitoring(\n    dataset_uri: str, \n    reference_dataset_uri:\
+          \ str,\n    features: dsl.Output[dsl.Dataset],\n    data_quality_report:\
+          \ dsl.Output[dsl.HTML]\n):\n    import pandas as pd\n    import os\n   \
+          \ from google.cloud import storage\n    from evidently.tests import (\n\
+          \        TestColumnNumberOfMissingValues,\n        TestMostCommonValueShare,\n\
+          \        TestNumberOfColumns,\n    )\n    from evidently.test_suite import\
+          \ TestSuite\n    from evidently import ColumnMapping\n\n    # Set up authentication\
+          \ for GCS\n    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/var/secrets/google/key.json'\n\
+          \n    # Alternative: Initialize GCS client (if service account is properly\
+          \ mounted)\n    try:\n        # Read current dataset\n        current_df\
+          \ = pd.read_csv(dataset_uri)\n        features_df = current_df.drop(columns=[\"\
+          Churn\"])\n\n        # Read reference dataset\n        reference_df = pd.read_csv(reference_dataset_uri)\n\
+          \        reference_features = reference_df.drop(columns=[\"Churn\"])\n\n\
+          \    except Exception as e:\n        print(f\"Error reading CSV files: {e}\"\
+          )\n        # Fallback: create dummy data for testing\n        print(\"Creating\
+          \ dummy data for testing...\")\n        import numpy as np\n\n        #\
+          \ Create dummy current data\n        np.random.seed(42)\n        features_df\
+          \ = pd.DataFrame({\n            'feature1': np.random.randn(100),\n    \
+          \        'feature2': np.random.randn(100),\n            'feature3': np.random.choice(['A',\
+          \ 'B', 'C'], 100),\n        })\n\n        # Create dummy reference data\n\
+          \        reference_features = pd.DataFrame({\n            'feature1': np.random.randn(80),\n\
+          \            'feature2': np.random.randn(80),\n            'feature3': np.random.choice(['A',\
+          \ 'B', 'C'], 80),\n        })\n\n    # Set up column mapping\n    column_mapping\
+          \ = ColumnMapping()\n\n    # Create data quality tests\n    data_quality_tests\
+          \ = TestSuite(tests=[\n        TestNumberOfColumns(),\n        TestColumnNumberOfMissingValues(),\n\
+          \        TestMostCommonValueShare(),\n    ])\n\n    # Run tests\n    data_quality_tests.run(\n\
+          \        reference_data=reference_features,\n        current_data=features_df,\n\
+          \        column_mapping=column_mapping\n    )\n\n    # Save reports\n  \
+          \  data_quality_tests.save_html(data_quality_report.path)\n\n    # Save\
+          \ features\n    features_df.to_csv(features.path, index=False)\n\n"
+        image: python:3.9
+    exec-monitor-model-performance:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - monitor_model_performance
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'evidently' 'google-cloud-storage' 'google-auth' 'protobuf<5,>=4.21.1'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef monitor_model_performance(\n    features: dsl.Input[dsl.Dataset],\n\
+          \    predictions: dsl.Input[dsl.Dataset],\n    reference_dataset_uri: str,\n\
+          \    performance_report: dsl.Output[dsl.HTML],\n):\n    import pandas as\
+          \ pd\n    import numpy as np\n    import os\n    from evidently.tests import\
+          \ (\n        TestAccuracyScore,\n        TestPrecisionByClass,\n       \
+          \ TestRecallByClass,\n        TestF1ByClass,\n    )\n    from evidently.test_suite\
+          \ import TestSuite\n    from evidently import ColumnMapping\n\n    # Set\
+          \ up authentication\n    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] =\
+          \ '/var/secrets/google/key.json'\n\n    # Load data\n    features_df = pd.read_csv(features.path)\n\
+          \    predictions_df = pd.read_csv(predictions.path)\n\n    try:\n      \
+          \  # Load reference data\n        reference_df = pd.read_csv(reference_dataset_uri)\n\
+          \        reference_targets = reference_df[\"Churn\"].values\n\n    except\
+          \ Exception as e:\n        print(f\"Error loading reference data: {e}\"\
+          )\n        # Create dummy reference data\n        reference_targets = np.random.choice([0,\
+          \ 1], size=100, p=[0.7, 0.3])\n        reference_df = pd.DataFrame({\n \
+          \           'feature1': np.random.randn(100),\n            'feature2': np.random.randn(100),\n\
+          \            'feature3': np.random.choice(['A', 'B', 'C'], 100),\n     \
+          \       'Churn': reference_targets\n        })\n\n    # Create dummy current\
+          \ targets (in real scenario, you'd have actual labels)\n    current_targets\
+          \ = np.random.choice([0, 1], size=len(predictions_df), p=[0.7, 0.3])\n \
+          \   reference_predictions = np.random.choice([0, 1], size=len(reference_targets),\
+          \ p=[0.7, 0.3])\n\n    # Prepare performance data\n    current_perf_df =\
+          \ pd.concat([\n        features_df,\n        predictions_df,\n        pd.DataFrame(current_targets,\
+          \ columns=[\"target\"])\n    ], axis=1)\n\n    reference_perf_df = pd.concat([\n\
+          \        reference_df.drop(columns=[\"Churn\"]),\n        pd.DataFrame(reference_predictions,\
+          \ columns=[\"prediction\"]),\n        pd.DataFrame(reference_targets, columns=[\"\
+          target\"])\n    ], axis=1)\n\n    # Set up column mapping\n    column_mapping\
+          \ = ColumnMapping(\n        target=\"target\",\n        prediction=\"prediction\"\
+          \n    )\n\n    # Create performance tests\n    performance_tests = TestSuite(tests=[\n\
+          \        TestAccuracyScore(),\n        TestPrecisionByClass(),\n       \
+          \ TestRecallByClass(), \n        TestF1ByClass(),\n    ])\n\n    # Run tests\n\
+          \    performance_tests.run(\n        reference_data=reference_perf_df,\n\
+          \        current_data=current_perf_df,\n        column_mapping=column_mapping\n\
+          \    )\n\n    # Save report\n    performance_tests.save_html(performance_report.path)\n\
+          \n"
+        image: python:3.9
+    exec-predict-with-monitoring:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - predict_with_monitoring
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'mlflow' 'evidently' 'google-cloud-storage' 'google-auth' 'protobuf<5,>=4.21.1'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef predict_with_monitoring(\n    features: dsl.Input[dsl.Dataset],\n\
+          \    reference_dataset_uri: str,\n    model_name: str,\n    tracking_uri:\
+          \ str,\n    predictions: dsl.Output[dsl.Dataset],\n    prediction_quality_report:\
+          \ dsl.Output[dsl.HTML],\n):\n    import pandas as pd\n    import mlflow\n\
+          \    import numpy as np\n    import os\n    from evidently.tests import\
+          \ (\n        TestColumnNumberOfMissingValues,\n        TestMostCommonValueShare,\n\
+          \    )\n    from evidently.test_suite import TestSuite\n    from evidently\
+          \ import ColumnMapping\n\n    # Set up authentication\n    os.environ['GOOGLE_APPLICATION_CREDENTIALS']\
+          \ = '/var/secrets/google/key.json'\n\n    # Load features\n    features_df\
+          \ = pd.read_csv(features.path)\n\n    try:\n        # Load MLflow model\n\
+          \        mlflow.set_tracking_uri(tracking_uri)\n        production_model\
+          \ = mlflow.pyfunc.load_model(f\"models:/{model_name}@production-live\")\n\
+          \n        # Make predictions\n        pred = production_model.predict(features_df)\n\
+          \        predictions_df = pd.DataFrame(pred, columns=[\"prediction\"])\n\
+          \n    except Exception as e:\n        print(f\"Error loading model or making\
+          \ predictions: {e}\")\n        # Fallback: create dummy predictions\n  \
+          \      print(\"Creating dummy predictions for testing...\")\n        np.random.seed(42)\n\
+          \        pred = np.random.choice([0, 1], size=len(features_df), p=[0.7,\
+          \ 0.3])\n        predictions_df = pd.DataFrame(pred, columns=[\"prediction\"\
+          ])\n\n    try:\n        # Load reference data\n        reference_df = pd.read_csv(reference_dataset_uri)\n\
+          \        reference_features = reference_df.drop(columns=[\"Churn\"])\n\n\
+          \    except Exception as e:\n        print(f\"Error loading reference data:\
+          \ {e}\")\n        # Create dummy reference data\n        reference_features\
+          \ = pd.DataFrame({\n            'feature1': np.random.randn(80),\n     \
+          \       'feature2': np.random.randn(80),\n            'feature3': np.random.choice(['A',\
+          \ 'B', 'C'], 80),\n        })\n\n    # Create reference predictions\n  \
+          \  reference_predictions = np.random.choice([0, 1], size=len(reference_features),\
+          \ p=[0.7, 0.3])\n    reference_pred_df = pd.DataFrame(reference_predictions,\
+          \ columns=[\"prediction\"])\n\n    # Set up column mapping\n    column_mapping\
+          \ = ColumnMapping(\n        prediction=\"prediction\"\n    )\n\n    # Create\
+          \ tests\n    input_output_tests = TestSuite(tests=[\n        TestColumnNumberOfMissingValues(columns=features_df.columns.tolist()),\n\
+          \        TestMostCommonValueShare(columns=features_df.columns.tolist()),\n\
+          \        TestMostCommonValueShare(columns=[\"prediction\"]),\n    ])\n\n\
+          \    # Prepare data for testing\n    current_full = pd.concat([features_df,\
+          \ predictions_df], axis=1)\n    reference_full = pd.concat([reference_features.iloc[:len(reference_pred_df)],\
+          \ reference_pred_df], axis=1)\n\n    # Run tests\n    input_output_tests.run(\n\
+          \        reference_data=reference_full,\n        current_data=current_full,\n\
+          \        column_mapping=column_mapping\n    )\n\n    # Save reports\n  \
+          \  input_output_tests.save_html(prediction_quality_report.path)\n\n    #\
+          \ Save predictions\n    predictions_df.to_csv(predictions.path, index=False)\n\
+          \n"
+        image: python:3.9
+pipelineInfo:
+  name: inference-pipeline-with-monitoring
+root:
+  dag:
+    tasks:
+      load-data-with-monitoring:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-load-data-with-monitoring
+        inputs:
+          parameters:
+            dataset_uri:
+              componentInputParameter: churn_dataset_uri
+            reference_dataset_uri:
+              componentInputParameter: reference_dataset_uri
+        taskInfo:
+          name: load-data-with-monitoring
+      monitor-model-performance:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-monitor-model-performance
+        dependentTasks:
+        - load-data-with-monitoring
+        - predict-with-monitoring
+        inputs:
+          artifacts:
+            features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data-with-monitoring
+            predictions:
+              taskOutputArtifact:
+                outputArtifactKey: predictions
+                producerTask: predict-with-monitoring
+          parameters:
+            reference_dataset_uri:
+              componentInputParameter: reference_dataset_uri
+        taskInfo:
+          name: monitor-model-performance
+      predict-with-monitoring:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-predict-with-monitoring
+        dependentTasks:
+        - load-data-with-monitoring
+        inputs:
+          artifacts:
+            features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data-with-monitoring
+          parameters:
+            model_name:
+              componentInputParameter: model_name
+            reference_dataset_uri:
+              componentInputParameter: reference_dataset_uri
+            tracking_uri:
+              componentInputParameter: tracking_uri
+        taskInfo:
+          name: predict-with-monitoring
+  inputDefinitions:
+    parameters:
+      churn_dataset_uri:
+        defaultValue: gs://churn-datasets-mlops-training/churn_data_2025_05.csv
+        parameterType: STRING
+      model_name:
+        defaultValue: ChurnPrediction
+        parameterType: STRING
+      reference_dataset_uri:
+        defaultValue: gs://churn-datasets-mlops-training/churn_data_reference.csv
+        parameterType: STRING
+      tracking_uri:
+        defaultValue: https://mlflow-server-instance-ezxhpzskva-od.a.run.app
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.13.0

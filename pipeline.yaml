@@ -1,0 +1,652 @@
+# PIPELINE DEFINITION
+# Name: inference-pipeline
+# Inputs:
+#    churn_dataset_uri: str [Default: 'gs://churn-datasets-mlops-training/churn_data_2025_05.csv']
+#    model_name: str [Default: 'ChurnPrediction']
+#    project_id: str [Default: '01971c25-72f5-729c-adfa-07e255c0d9a3']
+#    reference_dataset_uri: str [Default: 'gs://churn-datasets-mlops-training/churn_data_2025_03.csv']
+#    tracking_uri: str [Default: 'https://mlflow-server-instance-ezxhpzskva-od.a.run.app']
+#    workspace: str [Default: 'https://evidently-server-instance-988498511057.europe-west9.run.app']
+components:
+  comp-data-drift:
+    executorLabel: exec-data-drift
+    inputDefinitions:
+      artifacts:
+        current_features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        reference_features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        project_id:
+          parameterType: STRING
+        workspace:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+  comp-data-quality:
+    executorLabel: exec-data-quality
+    inputDefinitions:
+      artifacts:
+        current_features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        reference_features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        project_id:
+          parameterType: STRING
+        workspace:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+  comp-load-data:
+    executorLabel: exec-load-data
+    inputDefinitions:
+      parameters:
+        dataset_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        target:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-load-data-2:
+    executorLabel: exec-load-data-2
+    inputDefinitions:
+      parameters:
+        dataset_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        target:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-post-process:
+    executorLabel: exec-post-process
+    inputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        predictions:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        target:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-predict:
+    executorLabel: exec-predict
+    inputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        model_name:
+          parameterType: STRING
+        tracking_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        predictions:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-predict-2:
+    executorLabel: exec-predict-2
+    inputDefinitions:
+      artifacts:
+        features:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        model_name:
+          parameterType: STRING
+        tracking_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        predictions:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-prediction-drift:
+    executorLabel: exec-prediction-drift
+    inputDefinitions:
+      artifacts:
+        current_target:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        reference_target:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        project_id:
+          parameterType: STRING
+        workspace:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        drift_report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-data-drift:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_drift
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'evidently==0.6.6'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_drift(\n    reference_features: dsl.Input[dsl.Dataset],\n\
+          \    current_features: dsl.Input[dsl.Dataset],\n    report: dsl.Output[dsl.HTML],\n\
+          \    workspace: str,\n    project_id: str,\n):\n    import pandas as pd\n\
+          \    from datetime import datetime\n    from evidently.report import Report\n\
+          \    from evidently.test_suite import TestSuite\n    from evidently.ui.remote\
+          \ import RemoteWorkspace\n    from evidently.metrics import DatasetDriftMetric\n\
+          \    from evidently.test_preset import DataDriftTestPreset\n\n    ws = RemoteWorkspace(workspace)\n\
+          \    project = ws.get_project(project_id)\n\n    reference_df = pd.read_csv(reference_features.path)\n\
+          \    current_df = pd.read_csv(current_features.path)\n    test_suite = TestSuite(tests=[DataDriftTestPreset()],\
+          \ timestamp=datetime.now(), tags=[\"data_drift_test_suite\"])\n    report\
+          \ = Report(\n        metrics=[\n            DatasetDriftMetric(),\n    \
+          \    ],\n        tags=[\"data_drift\"],\n    )\n\n    test_suite.run(reference_data=reference_df,\
+          \ current_data=current_df)\n    report.run(reference_data=reference_df,\
+          \ current_data=current_df)\n    ws.add_test_suite(project.id, test_suite)\n\
+          \    ws.add_report(project.id, report)\n\n"
+        image: python:3.12
+    exec-data-quality:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_quality
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'evidently==0.6.6'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_quality(\n    reference_features: dsl.Input[dsl.Dataset],\n\
+          \    current_features: dsl.Input[dsl.Dataset],\n    report: dsl.Output[dsl.HTML],\n\
+          \    workspace: str,\n    project_id: str,\n):\n    import pandas as pd\n\
+          \    from datetime import datetime\n    from evidently.test_suite import\
+          \ TestSuite\n    from evidently.ui.remote import RemoteWorkspace\n    from\
+          \ evidently.test_preset import DataStabilityTestPreset\n\n    ws = RemoteWorkspace(workspace)\n\
+          \    project = ws.get_project(project_id)\n\n    reference_df = pd.read_csv(reference_features.path)\n\
+          \    current_df = pd.read_csv(current_features.path)\n    test_suite = TestSuite(tests=[DataStabilityTestPreset()],\
+          \ timestamp=datetime.now(), tags=[\"data_quality_test_suite\"])\n    test_suite.run(reference_data=reference_df,\
+          \ current_data=current_df)\n    ws.add_test_suite(project.id, test_suite)\n\
+          \n"
+        image: python:3.12
+    exec-load-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - load_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'fsspec' 'gcsfs'\
+          \ 'pandas' 'scikit-learn' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef load_data(\n    dataset_uri: str, features: dsl.Output[dsl.Dataset],\
+          \ target: dsl.Output[dsl.Dataset]\n):\n    import pandas as pd\n\n    df\
+          \ = pd.read_csv(dataset_uri)\n    features_df = df.drop(columns=[\"Churn\"\
+          ])\n    target_df = df[[\"Churn\"]]\n    features_df.to_csv(features.path,\
+          \ index=False)\n    target_df.to_csv(target.path, index=False)\n\n"
+        image: python:3.11
+    exec-load-data-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - load_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'fsspec' 'gcsfs'\
+          \ 'pandas' 'scikit-learn' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef load_data(\n    dataset_uri: str, features: dsl.Output[dsl.Dataset],\
+          \ target: dsl.Output[dsl.Dataset]\n):\n    import pandas as pd\n\n    df\
+          \ = pd.read_csv(dataset_uri)\n    features_df = df.drop(columns=[\"Churn\"\
+          ])\n    target_df = df[[\"Churn\"]]\n    features_df.to_csv(features.path,\
+          \ index=False)\n    target_df.to_csv(target.path, index=False)\n\n"
+        image: python:3.11
+    exec-post-process:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - post_process
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'evidently==0.6.6'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef post_process(\n    features: dsl.Input[dsl.Dataset],\n    target:\
+          \ dsl.Input[dsl.Dataset],\n    predictions: dsl.Input[dsl.Dataset],\n  \
+          \  output_dataset: dsl.Output[dsl.Dataset],\n):\n    import pandas as pd\n\
+          \n    df = pd.read_csv(features.path)\n    df[\"predictions\"] = pd.read_csv(predictions.path)\n\
+          \    df[\"Churn\"] = pd.read_csv(target.path)\n    df.to_csv(output_dataset.path,\
+          \ index=False)\n\n"
+        image: python:3.12
+    exec-predict:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - predict
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'mlflow' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef predict(\n    features: dsl.Input[dsl.Dataset],\n    model_name:\
+          \ str,\n    tracking_uri: str,\n    predictions: dsl.Output[dsl.Dataset],\n\
+          ):\n    import pandas as pd\n    import mlflow\n\n    mlflow.set_tracking_uri(tracking_uri)\n\
+          \n    production_model = mlflow.pyfunc.load_model(f\"models:/{model_name}@production-live\"\
+          )\n\n    features_df = pd.read_csv(features.path)\n    pred = production_model.predict(features_df)\n\
+          \    predictions_df = pd.DataFrame(pred, columns=[\"prediction\"])\n   \
+          \ predictions_df.to_csv(predictions.path, index=False)\n\n"
+        image: python:3.11
+    exec-predict-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - predict
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn'\
+          \ 'mlflow' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef predict(\n    features: dsl.Input[dsl.Dataset],\n    model_name:\
+          \ str,\n    tracking_uri: str,\n    predictions: dsl.Output[dsl.Dataset],\n\
+          ):\n    import pandas as pd\n    import mlflow\n\n    mlflow.set_tracking_uri(tracking_uri)\n\
+          \n    production_model = mlflow.pyfunc.load_model(f\"models:/{model_name}@production-live\"\
+          )\n\n    features_df = pd.read_csv(features.path)\n    pred = production_model.predict(features_df)\n\
+          \    predictions_df = pd.DataFrame(pred, columns=[\"prediction\"])\n   \
+          \ predictions_df.to_csv(predictions.path, index=False)\n\n"
+        image: python:3.11
+    exec-prediction-drift:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - prediction_drift
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'evidently==0.6.6'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef prediction_drift(\n    reference_target: dsl.Input[dsl.Dataset],\n\
+          \    current_target: dsl.Input[dsl.Dataset],\n    drift_report: dsl.Output[dsl.HTML],\n\
+          \    workspace: str,\n    project_id: str,\n):\n    import pandas as pd\n\
+          \    from datetime import datetime\n    from evidently.report import Report\n\
+          \    from evidently.metrics import ColumnDriftMetric\n    from evidently.ui.remote\
+          \ import RemoteWorkspace\n\n    ws = RemoteWorkspace(workspace)\n    project\
+          \ = ws.get_project(project_id)\n\n    reference_df = pd.read_csv(reference_target.path)\n\
+          \    current_df = pd.read_csv(current_target.path)\n    report = Report(\n\
+          \        metrics=[ColumnDriftMetric(column_name=\"prediction\")], timestamp=datetime.now(),\
+          \ tags=[\"prediction_drift\"]\n    )\n    report.run(reference_data=reference_df,\
+          \ current_data=current_df)\n    ws.add_report(project.id, report)\n\n"
+        image: python:3.12
+pipelineInfo:
+  name: inference-pipeline
+root:
+  dag:
+    tasks:
+      data-drift:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-drift
+        dependentTasks:
+        - load-data
+        - load-data-2
+        inputs:
+          artifacts:
+            current_features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data-2
+            reference_features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data
+          parameters:
+            project_id:
+              componentInputParameter: project_id
+            workspace:
+              componentInputParameter: workspace
+        taskInfo:
+          name: Data Drift
+      data-quality:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-quality
+        dependentTasks:
+        - load-data
+        - load-data-2
+        inputs:
+          artifacts:
+            current_features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data-2
+            reference_features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data
+          parameters:
+            project_id:
+              componentInputParameter: project_id
+            workspace:
+              componentInputParameter: workspace
+        taskInfo:
+          name: Data Quality
+      load-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-load-data
+        inputs:
+          parameters:
+            dataset_uri:
+              componentInputParameter: reference_dataset_uri
+        taskInfo:
+          name: Load Reference Data
+      load-data-2:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-load-data-2
+        inputs:
+          parameters:
+            dataset_uri:
+              componentInputParameter: churn_dataset_uri
+        taskInfo:
+          name: Load Current Data
+      post-process:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-post-process
+        dependentTasks:
+        - load-data-2
+        - predict
+        inputs:
+          artifacts:
+            features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data-2
+            predictions:
+              taskOutputArtifact:
+                outputArtifactKey: predictions
+                producerTask: predict
+            target:
+              taskOutputArtifact:
+                outputArtifactKey: target
+                producerTask: load-data-2
+        taskInfo:
+          name: Post Process
+      predict:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-predict
+        dependentTasks:
+        - load-data-2
+        inputs:
+          artifacts:
+            features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data-2
+          parameters:
+            model_name:
+              componentInputParameter: model_name
+            tracking_uri:
+              componentInputParameter: tracking_uri
+        taskInfo:
+          name: Predict Current
+      predict-2:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-predict-2
+        dependentTasks:
+        - load-data
+        inputs:
+          artifacts:
+            features:
+              taskOutputArtifact:
+                outputArtifactKey: features
+                producerTask: load-data
+          parameters:
+            model_name:
+              componentInputParameter: model_name
+            tracking_uri:
+              componentInputParameter: tracking_uri
+        taskInfo:
+          name: Predict Reference
+      prediction-drift:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-prediction-drift
+        dependentTasks:
+        - predict
+        - predict-2
+        inputs:
+          artifacts:
+            current_target:
+              taskOutputArtifact:
+                outputArtifactKey: predictions
+                producerTask: predict
+            reference_target:
+              taskOutputArtifact:
+                outputArtifactKey: predictions
+                producerTask: predict-2
+          parameters:
+            project_id:
+              componentInputParameter: project_id
+            workspace:
+              componentInputParameter: workspace
+        taskInfo:
+          name: Target Drift
+  inputDefinitions:
+    parameters:
+      churn_dataset_uri:
+        defaultValue: gs://churn-datasets-mlops-training/churn_data_2025_05.csv
+        parameterType: STRING
+      model_name:
+        defaultValue: ChurnPrediction
+        parameterType: STRING
+      project_id:
+        defaultValue: 01971c25-72f5-729c-adfa-07e255c0d9a3
+        parameterType: STRING
+      reference_dataset_uri:
+        defaultValue: gs://churn-datasets-mlops-training/churn_data_2025_03.csv
+        parameterType: STRING
+      tracking_uri:
+        defaultValue: https://mlflow-server-instance-ezxhpzskva-od.a.run.app
+        parameterType: STRING
+      workspace:
+        defaultValue: https://evidently-server-instance-988498511057.europe-west9.run.app
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.13.0
